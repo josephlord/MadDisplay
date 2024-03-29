@@ -40,8 +40,7 @@ public struct BMP {
     }
 
     let header = UInt16(0x4D42)
-    let file: FileDescriptor
-
+    
     var bitmap: Bitmap! = nil
     var palette: Palette! = nil
     var colorConverter: ColorConverter? = nil
@@ -59,102 +58,114 @@ public struct BMP {
         var bfType = UInt16(0)
         var fileHeader = FileHeader()
         var infoHeader = InfoHeader()
-
-        file = FileDescriptor.open(path)
-        _ = withUnsafeMutableBytes(of: &bfType) { buffer in
-            file.read(into: buffer)
-        }
-
-        if bfType != header {
-            print("BMP file type error!")
-        }
-
-        _ = withUnsafeMutableBytes(of: &fileHeader) { buffer in
-            file.read(fromAbsoluteOffest: 2, into: buffer)
-        }
-
-        _ = withUnsafeMutableBytes(of: &infoHeader) { buffer in
-            file.read(fromAbsoluteOffest: 14, into: buffer)
-        }
-
-        //print(fileHeader)
-        //print(infoHeader)
-
-        width = Int(infoHeader.biWidth)
-        height = Int(infoHeader.biHeight)
-        bitsPerPixel = Int(infoHeader.biBitCount)
-        compression = infoHeader.biCompression == 3
-
-        let bytesPerLine = (bitsPerPixel * width + 31) / 32 * 4 
-        let imageByteSize = bytesPerLine * height
-
-        var imageData = [UInt32](repeating: 0x0, count: imageByteSize / 4)
-        _ = imageData.withUnsafeMutableBytes { buffer in
-            file.read(fromAbsoluteOffest: Int(fileHeader.bfOffBits), into: buffer)
-        }
-
-        if bitsPerPixel > 8 {
-            //print("------not indexed--------")
-            bitmap = Bitmap(width: width, height: height, bitCount: 32)
-
-            if bitsPerPixel == 32 {
-                for y in 0..<height {
-                    for x in 0..<width {
-                        bitmap.data[y * width + x] = imageData[(height - y - 1) * width + x]
-                    }
-                }
-            } else if bitsPerPixel == 24 {
-                for y in 0..<height {
-                    for x in 0..<width {
-                        let byteOffset = (height - y - 1) * bytesPerLine + x * 3
-                        var color32: UInt32 = 0
-                        imageData.withUnsafeBytes { ptr in
-                            let r = UInt32(ptr[byteOffset + 2]) << 16
-                            let g = UInt32(ptr[byteOffset + 1]) << 8
-                            let b = UInt32(ptr[byteOffset + 0])
-                            color32 = r | g | b
-                        }
-                        bitmap.data[y * width + x] = color32
-                    }
+        do {
+            
+            let file = try FileDescriptor.open(path)
+            defer {
+                do {
+                    try file.close()
+                } catch {
+                    assertionFailure("Failed to close bitmap file")
                 }
             }
-        } else {
-            //print("------indexed--------")
-            let colorCount = 1 << bitsPerPixel
-            var colors = [UInt32](repeating: 0, count: colorCount)
-
-            _ = colors.withUnsafeMutableBytes { buffer in
-                file.read(fromAbsoluteOffest: 54, into: buffer)
-            }
-
-            palette = Palette(count: colorCount)
-            for i in 0..<colorCount {
-                palette[i] = colors[i]
-            }
-            if let trans = transparentColor {
-                if colors[0] == trans {
-                    palette.makeTransparent(0)
-                }
-            }
-            //print("bitsPerPixel = \(bitsPerPixel)")
-            bitmap = Bitmap(width: width, height: height, bitCount: bitsPerPixel)
-
-            if bitsPerPixel < 8 {
-                imageData = imageData.map {
-                    $0.byteSwapped
-                }
+            _ = try withUnsafeMutableBytes(of: &bfType) { buffer in
+                try file.read(into: buffer)
             }
             
-            //print("bitmap uint32 size = \(bitmap.data.count), image uint32 size = \(imageData.count)")
-            let uint32CountPerLine = bytesPerLine / 4
-            for r in 0..<height {
-                for c in 0..<uint32CountPerLine {
-                    bitmap.data[r * uint32CountPerLine + c] = imageData[(height - r - 1) * uint32CountPerLine + c]
+            if bfType != header {
+                print("BMP file type error!")
+            }
+            
+            _ = try withUnsafeMutableBytes(of: &fileHeader) { buffer in
+                try file.read(fromAbsoluteOffest: 2, into: buffer)
+            }
+            
+            _ = try withUnsafeMutableBytes(of: &infoHeader) { buffer in
+                try file.read(fromAbsoluteOffest: 14, into: buffer)
+            }
+            
+            //print(fileHeader)
+            //print(infoHeader)
+            
+            width = Int(infoHeader.biWidth)
+            height = Int(infoHeader.biHeight)
+            bitsPerPixel = Int(infoHeader.biBitCount)
+            compression = infoHeader.biCompression == 3
+            
+            let bytesPerLine = (bitsPerPixel * width + 31) / 32 * 4
+            let imageByteSize = bytesPerLine * height
+            
+            var imageData = [UInt32](repeating: 0x0, count: imageByteSize / 4)
+            _ = try imageData.withUnsafeMutableBytes { buffer in
+                try file.read(fromAbsoluteOffest: Int(fileHeader.bfOffBits), into: buffer)
+            }
+            
+            if bitsPerPixel > 8 {
+                //print("------not indexed--------")
+                bitmap = Bitmap(width: width, height: height, bitCount: 32)
+                
+                if bitsPerPixel == 32 {
+                    for y in 0..<height {
+                        for x in 0..<width {
+                            bitmap.data[y * width + x] = imageData[(height - y - 1) * width + x]
+                        }
+                    }
+                } else if bitsPerPixel == 24 {
+                    for y in 0..<height {
+                        for x in 0..<width {
+                            let byteOffset = (height - y - 1) * bytesPerLine + x * 3
+                            var color32: UInt32 = 0
+                            imageData.withUnsafeBytes { ptr in
+                                let r = UInt32(ptr[byteOffset + 2]) << 16
+                                let g = UInt32(ptr[byteOffset + 1]) << 8
+                                let b = UInt32(ptr[byteOffset + 0])
+                                color32 = r | g | b
+                            }
+                            bitmap.data[y * width + x] = color32
+                        }
+                    }
+                }
+            } else {
+                //print("------indexed--------")
+                let colorCount = 1 << bitsPerPixel
+                var colors = [UInt32](repeating: 0, count: colorCount)
+                
+                _ = try colors.withUnsafeMutableBytes { buffer in
+                    try file.read(fromAbsoluteOffest: 54, into: buffer)
+                }
+                
+                palette = Palette(count: colorCount)
+                for i in 0..<colorCount {
+                    palette[i] = colors[i]
+                }
+                if let trans = transparentColor {
+                    if colors[0] == trans {
+                        palette.makeTransparent(0)
+                    }
+                }
+                //print("bitsPerPixel = \(bitsPerPixel)")
+                bitmap = Bitmap(width: width, height: height, bitCount: bitsPerPixel)
+                
+                if bitsPerPixel < 8 {
+                    imageData = imageData.map {
+                        $0.byteSwapped
+                    }
+                }
+                
+                //print("bitmap uint32 size = \(bitmap.data.count), image uint32 size = \(imageData.count)")
+                let uint32CountPerLine = bytesPerLine / 4
+                for r in 0..<height {
+                    for c in 0..<uint32CountPerLine {
+                        bitmap.data[r * uint32CountPerLine + c] = imageData[(height - r - 1) * uint32CountPerLine + c]
+                    }
                 }
             }
+        } catch {
+            bitmap = Bitmap(width: 0, height: 0, bitCount: 0)
+            palette = Palette()
+            assertionFailure("Failed to open bitmap")
         }
-
-        file.close()
+        
     }
 
     /// Get bitmap info from the BMP file.
